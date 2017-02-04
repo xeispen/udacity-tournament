@@ -8,34 +8,39 @@ import psycopg2
 import bleach
 
 
-def connect():
+def connect(database_name="tournament"):
     """Connect to the PostgreSQL database.  Returns a database connection."""
-    return psycopg2.connect("dbname=tournament")
+    try:
+        db = psycopg2.connect("dbname={}".format(database_name))
+        c = db.cursor()
+        return db, c
+    except:
+        print("<ERROR MESSAGE>")
 
 
 def deleteMatches():
     """Remove all the match records from the database."""
-    DB = connect()
-    c = DB.cursor()
-    c.execute("DELETE FROM matches")
-    DB.commit()
-    return DB.close()
+    db, c = connect()
+    c.execute("TRUNCATE matches;")
+    db.commit()
+    return db.close()
+
 
 def deletePlayers():
     """Remove all the player records from the database."""
-    DB = connect()
-    c = DB.cursor()
-    c.execute("DELETE FROM players")
-    DB.commit()
-    return DB.close()
+    db, c = connect()
+    c.execute("TRUNCATE players CASCADE;")
+    db.commit()
+    return db.close()
+
 
 def countPlayers():
     """Returns the number of players currently registered."""
-    DB = connect()
-    c = DB.cursor()
-    c.execute("SELECT COUNT(*) FROM players")
+    db, c = connect()
+    c.execute("SELECT COUNT(*) FROM players;")
     ct = c.fetchone()
     return ct[0]
+
 
 def registerPlayer(name):
     """Adds a player to the tournament database.
@@ -47,11 +52,13 @@ def registerPlayer(name):
       name: the player's full name (need not be unique).
     """
     clean = bleach.clean(name)
-    DB = connect()
-    c = DB.cursor()
-    c.execute("INSERT INTO players (player_name) VALUES (%s)", (clean,))
-    DB.commit()
-    return DB.close()
+    params = (clean,)
+    query = "INSERT INTO players (player_name) VALUES (%s)"
+    db, c = connect()
+    c.execute(query, params)
+    db.commit()
+    return db.close()
+
 
 def playerStandings():
     """Returns a list of the players and their win records, sorted by wins.
@@ -66,39 +73,11 @@ def playerStandings():
         wins: the number of matches the player has won
         matches: the number of matches the player has played
     """
-    DB = connect()
-    c = DB.cursor()
-    c.execute("""SELECT
-                p.player_id id,
-                p.player_name pname,
-                COALESCE(wins.ct,0) wins,
-                COALESCE(mp1.ct,0)+COALESCE(mp2.ct,0) as matches
-                FROM players p
-                LEFT JOIN (
-                    SELECT
-                    count(match_id) as ct,
-                    win_id
-                    FROM matches
-                    GROUP BY win_id) wins
-                    ON p.player_id = wins.win_id
-                LEFT JOIN (
-                    SELECT
-                    count(match_id) as ct,
-                    p1_id
-                    FROM matches
-                    GROUP BY p1_id) mp1
-                    ON p.player_id = mp1.p1_id
-                LEFT JOIN (
-                    SELECT
-                    count(match_id) as ct,
-                    p2_id
-                    FROM matches
-                    GROUP BY p2_id) mp2
-                    ON p.player_id = mp2.p2_id
-                ORDER BY wins;""")
-
+    db, c = connect()
+    query = "select * from standing"
+    c.execute(query)
     standings = c.fetchall()
-    DB.close()
+    db.close()
     return standings
 
 
@@ -109,11 +88,12 @@ def reportMatch(winner, loser):
       winner:  the id number of the player who won
       loser:  the id number of the player who lost
     """
-    DB = connect()
-    c = DB.cursor()
-    c.execute("INSERT INTO matches (p1_id, p2_id, win_id) VALUES (%s,%s,%s)", (winner, loser, winner,))
-    DB.commit()
-    DB.close()
+    db, c = connect()
+    query = "INSERT INTO matches (lose_id, win_id) VALUES (%s,%s)"
+    params = (loser, winner,)
+    c.execute(query, params)
+    db.commit()
+    db.close()
 
 
 def swissPairings():
@@ -136,6 +116,7 @@ def swissPairings():
     pairs = len(standings)
     i = 0
     while i < pairs:
-        pair_list.append((standings[i][0],standings[i][1],standings[i+1][0],standings[i+1][1]))
+        pair_list.append(
+            (standings[i][0], standings[i][1], standings[i+1][0], standings[i+1][1]))
         i += 2
     return pair_list
